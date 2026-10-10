@@ -1,84 +1,65 @@
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-np.random.seed(5)
+np.random.seed(5)  # Reproducible random results
 
-# ==========================================================
-# 1. PARAMETERS + RANDOM DATA
-# ==========================================================
-
+# 1. Parameters and random data
 N = 5000
-SNR = np.arange(0, 11, 2)
+SNR = np.arange(0, 11, 2)  # SNR: 0, 2, 4, 6, 8, 10 dB
+data = np.random.randint(0, 2, N)  # Generate random bits
 
-data = np.random.randint(0, 2, N)
 
-
-# ==========================================================
-# 2. (2,1,2) CONVOLUTIONAL ENCODER
-# Generator: g1 = 111, g2 = 101
-# ==========================================================
-
+# 2. Convolutional encoder (rate 1/2, K=3)
 def encoder(data):
     m1 = m2 = 0
     code = []
 
     for b in data:
-        code += [b ^ m1 ^ m2, b ^ m2]
-        m2, m1 = m1, b
+        code += [b ^ m1 ^ m2, b ^ m2]  # Generate 2 coded bits
+        m2, m1 = m1, b                # Update memory
 
     return np.array(code)
 
-
-# Add 2 zeros to clear memory
+# Add two zero tail bits and encode
 encoded = encoder(np.append(data, [0, 0]))
 
 
-# ==========================================================
-# 3. BPSK MODULATION
-# 0 -> +1, 1 -> -1
-# ==========================================================
-
+# 3. BPSK modulation: 0 -> +1, 1 -> -1
 bpsk = 1 - 2 * encoded
 
 
-# ==========================================================
-# 4. VITERBI DECODER
-# ==========================================================
-
+# 4. Viterbi decoder
 def viterbi(r):
+    n = len(r) // 2  # Number of input steps
 
-    n = len(r) // 2
-
-    metric = np.array([0, 999999, 999999, 999999])
-    prev = np.zeros((n, 4), int)
-    bits = np.zeros((n, 4), int)
+    metric = np.array([0, 999999, 999999, 999999])  # Initial path metrics
+    prev = np.zeros((n, 4), int)  # Store previous states
+    bits = np.zeros((n, 4), int)  # Store decoded input bits
 
     for i in range(n):
-
-        new = np.ones(4) * 999999
+        new = np.ones(4) * 999999  # New path metrics
 
         for state in range(4):
+            m1, m2 = state // 2, state % 2  # Extract memory bits
 
-            m1, m2 = state // 2, state % 2
-
-            for b in [0, 1]:
-
+            for b in [0, 1]:  # Try both possible input bits
                 c1 = b ^ m1 ^ m2
-                c2 = b ^ m2
+                c2 = b ^ m2                 # Expected coded bits
+                next_state = 2*b + m1        # Calculate next state
 
-                next_state = 2*b + m1
+                # Hamming distance between expected and received bits
+                d = int(c1 != r[2*i]) + int(c2 != r[2*i+1])
+                value = metric[state] + d   # Update path metric
 
-                d = (c1 != r[2*i]) + (c2 != r[2*i+1])
-                value = metric[state] + d
-
-                if value < new[next_state]:
+                if value < new[next_state]: # Keep the best path
                     new[next_state] = value
                     prev[i, next_state] = state
                     bits[i, next_state] = b
 
-        metric = new
+        metric = new  # Update metrics
 
-    # Traceback
+    # Trace back from final state 00
     state = 0
     decoded = []
 
@@ -86,41 +67,25 @@ def viterbi(r):
         decoded.append(bits[i, state])
         state = prev[i, state]
 
-    return np.array(decoded[::-1])
+    return np.array(decoded[::-1])  # Restore bit order
 
 
-# ==========================================================
-# 5. AWGN CHANNEL + DEMODULATION + BER
-# ==========================================================
-
+# 5. AWGN channel, demodulation, and BER
 BER = []
 errors = []
 
 for snr in SNR:
+    snr_linear = 10**(snr/10)  # Convert dB to linear SNR
+    noise_var = 1 / snr_linear  # Calculate noise variance
 
-    # SNR dB -> linear
-    snr_linear = 10**(snr/10)
-
-    # Noise variance
-    noise_var = 1 / snr_linear
-
-    # AWGN
     noise = np.sqrt(noise_var) * np.random.randn(len(bpsk))
+    received = bpsk + noise     # Add AWGN to BPSK symbols
 
-    # Channel
-    received = bpsk + noise
+    demod = (received < 0).astype(int)  # BPSK demodulation
+    decoded = viterbi(demod)[:N]        # Decode and remove tail bits
 
-    # 6. BPSK Demodulation
-    demod = (received < 0).astype(int)
-
-    # 7. Viterbi decoding
-    decoded = viterbi(demod)[:N]
-
-    # 8. Error / mismatch
-    error = np.sum(data != decoded)
-
-    # 9. BER
-    ber = error / N
+    error = np.sum(data != decoded)     # Count bit errors
+    ber = error / N                     # Calculate BER
 
     errors.append(error)
     BER.append(ber)
@@ -128,56 +93,37 @@ for snr in SNR:
     print(f"SNR={snr:2d} dB   Errors={error:4d}   BER={ber:.6f}")
 
 
-# ==========================================================
-# Example signal at 4 dB for plotting
-# ==========================================================
-
+# 6. Generate an example received signal at 4 dB
 snr = 4
 noise_var = 1 / (10**(snr/10))
 
 noise = np.sqrt(noise_var) * np.random.randn(len(bpsk))
 received = bpsk + noise
-
 demod = (received < 0).astype(int)
 decoded = viterbi(demod)[:N]
 
 
-# ==========================================================
-# 10. SMOOTH SIGNALS FOR DISPLAY
-# ==========================================================
-
+# 7. Prepare signals for plotting
 show = 8
 samples = 100
 fc = 5
 
-# Input waveform
-input_wave = np.repeat(data[:show], samples)
+input_wave = np.repeat(data[:show], samples)        # Input waveform
+enc_wave = np.repeat(encoded[:2*show], samples)     # Encoded waveform
 
-# Encoded waveform
-enc_wave = np.repeat(encoded[:2*show], samples)
-
-# Time for BPSK
 t = np.arange(2 * show * samples) / samples
+carrier = np.cos(2*np.pi*fc*t)                     # Cosine carrier
 
-# Smooth carrier
-carrier = np.cos(2*np.pi*fc*t)
-
-# Smooth BPSK
 symbol_wave = np.repeat(bpsk[:2*show], samples)
-bpsk_wave = symbol_wave * carrier
+bpsk_wave = symbol_wave * carrier                  # BPSK waveform
 
-# Smooth AWGN received waveform
 noise_wave = np.sqrt(noise_var/2) * np.random.randn(len(bpsk_wave))
-received_wave = bpsk_wave + noise_wave
+received_wave = bpsk_wave + noise_wave             # Noisy waveform
 
-# Decoded waveform
-decoded_wave = np.repeat(decoded[:show], samples)
+decoded_wave = np.repeat(decoded[:show], samples)  # Decoded waveform
 
 
-# ==========================================================
-# 11. INPUT, ENCODED, BPSK, RECEIVED, DECODED GRAPHS
-# ==========================================================
-
+# 8. Plot input, encoded, modulated, received, and decoded signals
 plt.figure(figsize=(10, 10))
 
 plt.subplot(5,1,1)
@@ -213,20 +159,14 @@ plt.tight_layout()
 plt.show()
 
 
-# ==========================================================
-# 12. BER vs SNR
-# ==========================================================
-
+# 9. Plot BER versus SNR
 plt.figure()
 
-# semilogy cannot show BER = 0
-BER_plot = np.maximum(BER, 1/N)
+BER_plot = np.maximum(BER, 1/N)  # Replace zero only for plotting
 
 plt.semilogy(SNR, BER_plot, 'o-')
-
 plt.title("BER vs SNR")
 plt.xlabel("SNR (dB)")
 plt.ylabel("BER")
 plt.grid(True, which="both")
-
 plt.show()
